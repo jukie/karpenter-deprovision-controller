@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	disruptionWindowSchedKey    = "k8s.jukie.net/disruption-window-schedule"
-	disruptionWindowDurationKey = "k8s.jukie.net/disruption-window-duration"
+	DisruptionWindowSchedKey    = "k8s.jukie.net/disruption-window-schedule"
+	DisruptionWindowDurationKey = "k8s.jukie.net/disruption-window-duration"
 )
 
 type NodeClaimController struct {
@@ -41,13 +41,13 @@ func (c *NodeClaimController) Reconcile(ctx context.Context, nClaim *karpv1.Node
 	}
 
 	// Handle the blocking pods.
-	c.handleBlockingPods(ctx, podList.Items, nClaim.Status.NodeName)
+	c.HandleBlockingPods(ctx, podList.Items, nClaim.Status.NodeName)
 	return reconcile.Result{}, nil
 }
 
 func (c *NodeClaimController) Register(_ context.Context, mgr manager.Manager) error {
 	return ctrlruntime.NewControllerManagedBy(mgr).
-		Named("nodeclaim-controller").
+		Named("nodeclaim-nodeClaimController").
 		For(&karpv1.NodeClaim{}, builder.WithPredicates(predicate.Funcs{
 			// Reconcile all expired nodes upon startup
 			CreateFunc: func(e event.CreateEvent) bool {
@@ -67,14 +67,14 @@ func (c *NodeClaimController) Register(_ context.Context, mgr manager.Manager) e
 		Complete(reconcile.AsReconciler(mgr.GetClient(), c))
 }
 
-func (c *NodeClaimController) handleBlockingPods(ctx context.Context, pods []corev1.Pod, nodeName string) {
+func (c *NodeClaimController) HandleBlockingPods(ctx context.Context, pods []corev1.Pod, nodeName string) {
 	// Loop over pods on expired Node and conditionally remove blocking annotations
 	for _, pod := range pods {
 		if pod.Annotations[karpv1.DoNotDisruptAnnotationKey] == "" {
 			continue
 		}
 		// Check if configured Disruption Window is active
-		if !isDisruptionWindowActive(ctx, pod.Namespace, pod.Name, pod.Annotations[disruptionWindowSchedKey], pod.Annotations[disruptionWindowDurationKey]) {
+		if !IsDisruptionWindowActive(ctx, pod.Namespace, pod.Name, pod.Annotations[DisruptionWindowSchedKey], pod.Annotations[DisruptionWindowDurationKey]) {
 			continue
 		}
 
@@ -94,8 +94,8 @@ func (c *NodeClaimController) handleBlockingPods(ctx context.Context, pods []cor
 	}
 }
 
-// isDisruptionWindowActive checks if the current time is within the disruption window.
-func isDisruptionWindowActive(ctx context.Context, podNamespace, podName string, disruptionWindowSched, disruptionWindowDuration string) bool {
+// IsDisruptionWindowActive checks if the current time is within the disruption window.
+func IsDisruptionWindowActive(ctx context.Context, podNamespace, podName string, disruptionWindowSched, disruptionWindowDuration string) bool {
 	pod := podNamespace + "/" + podName
 	if disruptionWindowSched == "" {
 		return true

@@ -1,8 +1,9 @@
-package controller
+package controller_test
 
 import (
 	"context"
 	"fmt"
+	"github.com/jukie/karpenter-deprovision-controller/pkg/controller"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
@@ -71,31 +72,30 @@ func TestReconcileNodeClaim(t *testing.T) {
 		karpv1.DoNotDisruptAnnotationKey: "true",
 	})
 	blockingInactiveSchedulePod := setupTestPod("blocking-inactive-sched", "testing", expiredNode.Name, map[string]string{
-		karpv1.DoNotDisruptAnnotationKey: "true",
-		disruptionWindowSchedKey:         fmt.Sprintf("0 %d * * *", time.Now().Add(-4*time.Hour).UTC().Hour()),
-		disruptionWindowDurationKey:      "4h",
+		karpv1.DoNotDisruptAnnotationKey:       "true",
+		controller.DisruptionWindowSchedKey:    fmt.Sprintf("0 %d * * *", time.Now().Add(-4*time.Hour).UTC().Hour()),
+		controller.DisruptionWindowDurationKey: "4h",
 	})
 	blockingActiveSchedulePod := setupTestPod("blocking-active-sched", "testing", expiredNode.Name, map[string]string{
-		karpv1.DoNotDisruptAnnotationKey: "true",
-		disruptionWindowSchedKey:         "* * * * *",
+		karpv1.DoNotDisruptAnnotationKey:    "true",
+		controller.DisruptionWindowSchedKey: "* * * * *",
 	})
 	blockingInvalidSchedulePod := setupTestPod("blocking-invalid-sched", "testing", expiredNode.Name, map[string]string{
-		karpv1.DoNotDisruptAnnotationKey: "true",
-		disruptionWindowSchedKey:         "hello",
-		disruptionWindowDurationKey:      "4h",
+		karpv1.DoNotDisruptAnnotationKey:       "true",
+		controller.DisruptionWindowSchedKey:    "hello",
+		controller.DisruptionWindowDurationKey: "4h",
 	})
 	blockingInvalidDurationPod := setupTestPod("blocking-invalid-duration", "testing", expiredNode.Name, map[string]string{
-		karpv1.DoNotDisruptAnnotationKey: "true",
-		disruptionWindowSchedKey:         "* * * * *",
-		disruptionWindowDurationKey:      "1h",
+		karpv1.DoNotDisruptAnnotationKey:       "true",
+		controller.DisruptionWindowSchedKey:    "* * * * *",
+		controller.DisruptionWindowDurationKey: "1h",
 	})
 
-	controller := &NodeClaimController{}
+	nodeClaimController := &controller.NodeClaimController{}
 	scheme := clienthelpers.GetScheme()
 
 	tests := []struct {
 		name           string
-		controller     *NodeClaimController
 		pods           []*corev1.Pod
 		nodeclaim      *karpv1.NodeClaim
 		node           *corev1.Node
@@ -104,7 +104,6 @@ func TestReconcileNodeClaim(t *testing.T) {
 	}{
 		{
 			name:           "No blocking annotation",
-			controller:     controller,
 			pods:           []*corev1.Pod{noBlockingAnnotationPod},
 			nodeclaim:      expireNodeClaim,
 			node:           expiredNode,
@@ -113,7 +112,6 @@ func TestReconcileNodeClaim(t *testing.T) {
 		},
 		{
 			name:           "Pod with blocking annotation and no schedule",
-			controller:     controller,
 			pods:           []*corev1.Pod{blockingNoSchedulePod},
 			nodeclaim:      expireNodeClaim,
 			node:           expiredNode,
@@ -122,7 +120,6 @@ func TestReconcileNodeClaim(t *testing.T) {
 		},
 		{
 			name:           "Pod with blocking annotation and inactive schedule",
-			controller:     controller,
 			pods:           []*corev1.Pod{blockingInactiveSchedulePod},
 			nodeclaim:      expireNodeClaim,
 			node:           expiredNode,
@@ -131,7 +128,6 @@ func TestReconcileNodeClaim(t *testing.T) {
 		},
 		{
 			name:           "Pod with blocking annotation and invalid schedule",
-			controller:     controller,
 			pods:           []*corev1.Pod{blockingInvalidSchedulePod},
 			nodeclaim:      expireNodeClaim,
 			node:           expiredNode,
@@ -140,7 +136,6 @@ func TestReconcileNodeClaim(t *testing.T) {
 		},
 		{
 			name:           "Pod with blocking annotation and active schedule but invalid duration",
-			controller:     controller,
 			pods:           []*corev1.Pod{blockingInvalidDurationPod},
 			nodeclaim:      expireNodeClaim,
 			node:           expiredNode,
@@ -149,7 +144,6 @@ func TestReconcileNodeClaim(t *testing.T) {
 		},
 		{
 			name:           "Pod with blocking annotation and active schedule",
-			controller:     controller,
 			pods:           []*corev1.Pod{blockingActiveSchedulePod},
 			nodeclaim:      expireNodeClaim,
 			node:           expiredNode,
@@ -160,17 +154,17 @@ func TestReconcileNodeClaim(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			controller.Client = fake.NewClientBuilder().
+			nodeClaimController.Client = fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(tt.objList...).
 				WithIndex(&corev1.Pod{}, "spec.nodeName", clienthelpers.PodIdxFunc).
 				Build()
-			_, err := controller.Reconcile(context.TODO(), tt.nodeclaim)
+			_, err := nodeClaimController.Reconcile(context.TODO(), tt.nodeclaim)
 			assert.NoError(t, err)
 
 			for _, pod := range tt.pods {
 				updatedPod := &corev1.Pod{}
-				err := controller.Client.Get(context.TODO(), client.ObjectKey{Namespace: pod.Namespace, Name: pod.Name}, updatedPod)
+				err := nodeClaimController.Client.Get(context.TODO(), client.ObjectKey{Namespace: pod.Namespace, Name: pod.Name}, updatedPod)
 				assert.NoError(t, err)
 				if tt.expectPodPatch {
 					assert.Equal(t, "", updatedPod.Annotations[karpv1.DoNotDisruptAnnotationKey], "Expected annotation to be removed")
@@ -188,14 +182,14 @@ func TestHandleBlockingPods(t *testing.T) {
 	noBlockingAnnotationPod := setupTestPod("no-blocking-annotation", "testing", expiredNodeName, nil)
 	blockingNoSchedulePod := setupTestPod("blocking-no-sched", "testing", expiredNodeName, map[string]string{karpv1.DoNotDisruptAnnotationKey: "true"})
 	blockingInactiveSchedulePod := setupTestPod("blocking-inactive-sched", "testing", expiredNodeName, map[string]string{
-		karpv1.DoNotDisruptAnnotationKey: "true",
-		disruptionWindowSchedKey:         fmt.Sprintf("%d %d * * *", time.Now().UTC().Minute(), time.Now().Add(-4*time.Hour).UTC().Hour()),
-		disruptionWindowDurationKey:      "4h",
+		karpv1.DoNotDisruptAnnotationKey:       "true",
+		controller.DisruptionWindowSchedKey:    fmt.Sprintf("%d %d * * *", time.Now().UTC().Minute(), time.Now().Add(-4*time.Hour).UTC().Hour()),
+		controller.DisruptionWindowDurationKey: "4h",
 	})
 	blockingActiveSchedulePod := setupTestPod("blocking-active-sched", "testing", "test-node", map[string]string{
-		karpv1.DoNotDisruptAnnotationKey: "true",
-		disruptionWindowSchedKey:         fmt.Sprintf("%d %d * * *", time.Now().UTC().Minute(), time.Now().UTC().Hour()),
-		disruptionWindowDurationKey:      "5h",
+		karpv1.DoNotDisruptAnnotationKey:       "true",
+		controller.DisruptionWindowSchedKey:    fmt.Sprintf("%d %d * * *", time.Now().UTC().Minute(), time.Now().UTC().Hour()),
+		controller.DisruptionWindowDurationKey: "5h",
 	})
 
 	tests := []struct {
@@ -236,10 +230,10 @@ func TestHandleBlockingPods(t *testing.T) {
 
 			fakeClient := fake.NewClientBuilder().WithRuntimeObjects(tt.objList...).Build()
 
-			controller := &NodeClaimController{
+			controller := &controller.NodeClaimController{
 				Client: fakeClient,
 			}
-			controller.handleBlockingPods(context.TODO(), tt.pods, "test-node")
+			controller.HandleBlockingPods(context.TODO(), tt.pods, "test-node")
 
 			for _, pod := range tt.pods {
 				updatedPod := &corev1.Pod{}
@@ -290,7 +284,7 @@ func TestIsDisruptionWindowActive(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.want, isDisruptionWindowActive(context.Background(), podNamespace, podName, tt.disruptionWindowSched, tt.disruptionWindowDuration), "isDisruptionWindowActive(%v, %v, %v, %v)", podNamespace, podName, tt.disruptionWindowSched, tt.disruptionWindowDuration)
+			assert.Equalf(t, tt.want, controller.IsDisruptionWindowActive(context.Background(), podNamespace, podName, tt.disruptionWindowSched, tt.disruptionWindowDuration), "isDisruptionWindowActive(%v, %v, %v, %v)", podNamespace, podName, tt.disruptionWindowSched, tt.disruptionWindowDuration)
 		})
 	}
 }
