@@ -1,0 +1,6 @@
+karpenter-deprovision-controller
+.**
+configs
+**/*.md
+**/*test.go
+Dockerfile

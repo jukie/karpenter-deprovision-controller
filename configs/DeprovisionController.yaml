@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: karpenter-deprovision-controller
+  namespace: karpenter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: karpenter-deprovision-controller
+  template:
+    metadata:
+      labels:
+        app: karpenter-deprovision-controller
+    spec:
+      serviceAccountName: karpenter-deprovision-controller
+      containers:
+      - name: controller
+        image: build-me
+        args:
+          - "--dry-run=false"
+        resources:
+          limits:
+            memory: 384Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: karpenter-deprovision-controller
+rules:
+  - apiGroups:
+      - ''
+    resources:
+      - events
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ''
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - karpenter.sh
+    resources:
+      - nodeclaims
+      - nodeclaims/status
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: karpenter-deprovision-controller
+subjects:
+- kind: ServiceAccount
+  name: karpenter-deprovision-controller
+  namespace: karpenter
+roleRef:
+  kind: ClusterRole
+  name: karpenter-deprovision-controller
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: karpenter-deprovision-controller
+  namespace: karpenter
