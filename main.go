@@ -49,7 +49,6 @@ func main() {
 		Scheme:   clienthelpers.GetScheme(),
 		Client:   opts,
 	})
-	//log.SetLogger(klog.NewKlogr())
 	if err != nil {
 		klog.Fatalf("Error creating Controller Manager: %v", err)
 	}
