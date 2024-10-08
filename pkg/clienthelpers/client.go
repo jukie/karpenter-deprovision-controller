@@ -3,19 +3,14 @@ package clienthelpers
 import (
 	"context"
 	"fmt"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"os"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	karpapis "sigs.k8s.io/karpenter/pkg/apis"
-	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // GetConfig attempts to create an in-cluster configuration and falls back to using KUBECONFIG from the environment if in-cluster config is not available.
@@ -30,18 +25,6 @@ func GetConfig() *rest.Config {
 		}
 	}
 	return config
-}
-
-// GetScheme configures a runtime schema that includes Karpenter CRDs
-func GetScheme() *runtime.Scheme {
-	scheme := runtime.NewScheme()
-	gv := schema.GroupVersion{Group: karpapis.Group, Version: "v1"}
-	v1.AddToGroupVersion(scheme, gv)
-	scheme.AddKnownTypes(gv, &karpv1.NodeClaim{}, &karpv1.NodeClaimList{})
-	if err := corev1.AddToScheme(scheme); err != nil {
-		klog.Fatalf("Failed to add corev1 to scheme: %v", err)
-	}
-	return scheme
 }
 
 // PodIdxFunc is used for listing pods by node

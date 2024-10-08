@@ -25,49 +25,50 @@ import (
 )
 
 const (
-	DisruptionWindowSchedKey    = "k8s.jukie.net/disruption-window-schedule"
-	DisruptionWindowDurationKey = "k8s.jukie.net/disruption-window-duration"
+	DisruptionWindowSchedKey      = "k8s.adsrvr.net/disruption-window-schedule"
+	DisruptionWindowDurationKey   = "k8s.adsrvr.net/disruption-window-duration"
+	DisruptionBlockedEventReason  = "DisruptionBlocked"
+	DisruptionBlockedEventMessage = "Cannot disrupt Node: state node is marked for deletion"
+	DisruptionBlockedEventKind    = "Node"
 )
 
-type NodeClaimController struct {
+type DeprovisionController struct {
 	Client client.Client
 }
 
-func (c *NodeClaimController) Reconcile(ctx context.Context, nClaim *karpv1.NodeClaim) (reconcile.Result, error) {
+func (c *DeprovisionController) Reconcile(ctx context.Context, e *corev1.Event) (reconcile.Result, error) {
 	// Get pods from expired NodeClaim
 	var podList corev1.PodList
-	if err := c.Client.List(ctx, &podList, client.MatchingFields{"spec.nodeName": nClaim.Status.NodeName}); err != nil {
+	if err := c.Client.List(ctx, &podList, client.MatchingFields{"spec.nodeName": e.InvolvedObject.Name}); err != nil {
 		return reconcile.Result{}, fmt.Errorf("failed getting pods from cache: %w", err)
 	}
 
 	// Handle the blocking pods.
-	c.HandleBlockingPods(ctx, podList.Items, nClaim.Status.NodeName)
+	c.HandleBlockingPods(ctx, podList.Items, e.InvolvedObject.Name)
 	return reconcile.Result{}, nil
 }
 
-func (c *NodeClaimController) Register(_ context.Context, mgr manager.Manager) error {
+func (c *DeprovisionController) Register(_ context.Context, mgr manager.Manager) error {
 	return ctrlruntime.NewControllerManagedBy(mgr).
-		Named("nodeclaim-nodeClaimController").
-		For(&karpv1.NodeClaim{}, builder.WithPredicates(predicate.Funcs{
+		Named("deprovision").
+		For(&corev1.Event{}, builder.WithPredicates(predicate.Funcs{
 			// Reconcile all expired nodes upon startup
 			CreateFunc: func(e event.CreateEvent) bool {
-				nClaim := e.Object.(*karpv1.NodeClaim)
-				return nClaim.StatusConditions().IsTrue("Expired")
+				karpEvent := e.Object.(*corev1.Event)
+				return karpEvent.Message == DisruptionBlockedEventMessage &&
+					// Kind and Reason are filtered for in manager cache options but leaving here for reference
+					karpEvent.InvolvedObject.Kind == DisruptionBlockedEventKind &&
+					karpEvent.Reason == DisruptionBlockedEventReason
 			},
 			// Reconcile only when the NodeClaim becomes expired.
-			UpdateFunc: func(e event.UpdateEvent) bool {
-				oldObj := e.ObjectOld.(*karpv1.NodeClaim)
-				newObj := e.ObjectNew.(*karpv1.NodeClaim)
-				return !oldObj.StatusConditions().IsTrue("Expired") && newObj.StatusConditions().IsTrue("Expired")
-			},
-			// Skip delete and generic events
+			UpdateFunc:  func(e event.UpdateEvent) bool { return false },
 			DeleteFunc:  func(e event.DeleteEvent) bool { return false },
 			GenericFunc: func(e event.GenericEvent) bool { return false },
 		})).
 		Complete(reconcile.AsReconciler(mgr.GetClient(), c))
 }
 
-func (c *NodeClaimController) HandleBlockingPods(ctx context.Context, pods []corev1.Pod, nodeName string) {
+func (c *DeprovisionController) HandleBlockingPods(ctx context.Context, pods []corev1.Pod, nodeName string) {
 	// Loop over pods on expired Node and conditionally remove blocking annotations
 	for _, pod := range pods {
 		if pod.Annotations[karpv1.DoNotDisruptAnnotationKey] == "" {

@@ -6,6 +6,8 @@ import (
 	"github.com/jukie/karpenter-deprovision-controller/pkg/clienthelpers"
 	"github.com/jukie/karpenter-deprovision-controller/pkg/controller"
 	"github.com/jukie/karpenter-deprovision-controller/pkg/metrics"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/klog/v2"
 	"os/signal"
 	ctrlruntime "sigs.k8s.io/controller-runtime"
@@ -18,7 +20,7 @@ import (
 
 var (
 	dryRun     bool
-	syncPeriod = 30 * time.Minute
+	syncPeriod = 60 * time.Minute
 	opts       = client.Options{}
 )
 
@@ -42,11 +44,17 @@ func main() {
 	metrics.Register()
 	mgr, err := ctrlruntime.NewManager(clienthelpers.GetConfig(), ctrlruntime.Options{
 		Cache: cache.Options{
-			Scheme:     clienthelpers.GetScheme(),
 			SyncPeriod: &syncPeriod,
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Event{}: {
+					Field: fields.SelectorFromSet(fields.Set{
+						"involvedObject.kind": controller.DisruptionBlockedEventKind,
+						"reason":              controller.DisruptionBlockedEventReason,
+					}),
+				},
+			},
 		},
 		NewCache: clienthelpers.NewCache,
-		Scheme:   clienthelpers.GetScheme(),
 		Client:   opts,
 	})
 	if err != nil {
@@ -59,7 +67,7 @@ func main() {
 	log.IntoContext(ctx, logger)
 	log.SetLogger(logger)
 
-	nController := &controller.NodeClaimController{Client: mgr.GetClient()}
+	nController := &controller.DeprovisionController{Client: mgr.GetClient()}
 	if err := nController.Register(context.Background(), mgr); err != nil {
 		klog.Fatalf("unable to register controller: %v", err)
 	}
